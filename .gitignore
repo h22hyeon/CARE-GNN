@@ -7,3 +7,4 @@
 backup.py
 *.txt
 *.ipynb
+*.zip
