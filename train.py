@@ -44,29 +44,31 @@ args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 print(f'run on {args.data}')
 
-# load graph, feature, and label
-[homo, relation1, relation2, relation3], feat_data, labels = load_data(args.data)
+# load graph, feature, and label (relation list로 여러 타입의 relation을 받아오도록 변경함.)
+homo, relation_list, feat_data, labels = load_data(args.data)
 
 # train_test split
 np.random.seed(args.seed)
 random.seed(args.seed)
+
+# Label의 비율을 동일하게 가져가기 위해 계층적 샘플링을 수행한다.
 if args.data == 'yelp':
 	index = list(range(len(labels)))
 	idx_train, idx_test, y_train, y_test = train_test_split(index, labels, stratify=labels, test_size=0.60,
 															random_state=2, shuffle=True)
 elif args.data == 'amazon':  # amazon
-	# 0-3304 are unlabeled nodes
+	# 0-3304 are unlabeled nodes - Amazon 데이터 셋은 unlabeld 노드가 존재한다.
 	index = list(range(3305, len(labels)))
 	idx_train, idx_test, y_train, y_test = train_test_split(index, labels[3305:], stratify=labels[3305:],
 															test_size=0.60, random_state=2, shuffle=True)
 
 # split pos neg sets for under-sampling
-train_pos, train_neg = pos_neg_split(idx_train, y_train)
+train_pos, train_neg = pos_neg_split(idx_train, y_train) # Training set에서 positive/negative sample에 대한 인덱스를 구분한다.
 
 # initialize model input
 features = nn.Embedding(feat_data.shape[0], feat_data.shape[1])
-feat_data = normalize(feat_data)
-features.weight = nn.Parameter(torch.FloatTensor(feat_data), requires_grad=False)
+feat_data = normalize(feat_data) # feature를 Row-normalize sparse matrix로 변환한다. 
+features.weight = nn.Parameter(torch.FloatTensor(feat_data), requires_grad=False) # feature를 임베딩한다 (고정).
 if args.cuda:
 	features.cuda()
 
@@ -74,7 +76,7 @@ if args.cuda:
 if args.model == 'SAGE':
 	adj_lists = homo
 else:
-	adj_lists = [relation1, relation2, relation3]
+	adj_lists = relation_list
 
 print(f'Model: {args.model}, Inter-AGG: {args.inter}, emb_size: {args.emb_size}.')
 
@@ -125,6 +127,7 @@ for epoch in range(args.num_epochs):
 		batch_nodes = sampled_idx_train[i_start:i_end]
 		batch_label = labels[np.array(batch_nodes)]
 		optimizer.zero_grad()
+		
 		if args.cuda:
 			loss = gnn_model.loss(batch_nodes, Variable(torch.cuda.LongTensor(batch_label)))
 		else:

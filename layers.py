@@ -90,47 +90,67 @@ class InterAgg(nn.Module):
 		"""
 
 		# extract 1-hop neighbor ids from adj lists of each single-relation graph
-		to_neighs = []
-		for adj_list in self.adj_lists:
-			to_neighs.append([set(adj_list[int(node)]) for node in nodes])
+		to_neighs = [] # 각 component에는 각 relation에 따른 타겟 노드의 이웃 노드의 인덱스가 존재함.
+		for adj_list in self.adj_lists: # 각 relation 별로
+			to_neighs.append([set(adj_list[int(node)]) for node in nodes]) # 배치를 구성하는 노드에 대한 이웃 노드를 추출한다.
 
 		# find unique nodes and their neighbors used in current batch
-		unique_nodes = set.union(set.union(*to_neighs[0]), set.union(*to_neighs[1]),
+		unique_nodes = set.union(set.union(*to_neighs[0]), set.union(*to_neighs[1]), # 배치에서 사용되는 모든 노드(이웃 노드들 포함)의 집합을 생성한다.
 								 set.union(*to_neighs[2], set(nodes)))
 
 		# calculate label-aware scores
 		if self.cuda:
+			# 배치에서 사용되는 모든 노드들에 대한 피처를 batch_features로 정의한다.
 			batch_features = self.features(torch.cuda.LongTensor(list(unique_nodes)))
 		else:
 			batch_features = self.features(torch.LongTensor(list(unique_nodes)))
+		# batch_features를 통해 생성한 label aware score를 batch_scores로 정의한다.
 		batch_scores = self.label_clf(batch_features)
+		
+		# 각 노드에 대한 매핑 딕셔너리를 생성한다.
+		# key: 전체 그래프에 대한 해당 노드의 인덱스
+		# value: unique_nodes set을 list로 변환했을 떄 해당 노드의 인덱스
+		"""
+		아래의 과정을 통해 딕셔너리는 node_id를 기준으로 unique_nodes에 존재하는 인덱스를 가리키게 된다.
+		batch_scores에 존재하는 값이 unique_nodes에 존재하는 노드 인덱스와 대응되므로 score를 가져올 때는 id_mapping를 이용한다. 
+		"""
 		id_mapping = {node_id: index for node_id, index in zip(unique_nodes, range(len(unique_nodes)))}
 
 		# the label-aware scores for current batch of nodes
+		# 배치를 구성하는 노드(타겟 노드)들의 similarity score를 center_scores로 정의한다.
 		center_scores = batch_scores[itemgetter(*nodes)(id_mapping), :]
 
 		# get neighbor node id list for each batch node and relation
+		# 각 relation에 따른 타겟 노드의 이웃 노드들의 리스트로 하여 r1_list를 생성한다 (이중 리스트). 
 		r1_list = [list(to_neigh) for to_neigh in to_neighs[0]]
 		r2_list = [list(to_neigh) for to_neigh in to_neighs[1]]
 		r3_list = [list(to_neigh) for to_neigh in to_neighs[2]]
 
 		# assign label-aware scores to neighbor nodes for each batch node and relation
+		# 각 relation에 따른 타겟 노드의 이웃 노드들의 similarity score를 리스트로 하여 r1_scores을 생성한다 (이중 리스트 내부에 tensor).
 		r1_scores = [batch_scores[itemgetter(*to_neigh)(id_mapping), :].view(-1, 2) for to_neigh in r1_list]
 		r2_scores = [batch_scores[itemgetter(*to_neigh)(id_mapping), :].view(-1, 2) for to_neigh in r2_list]
 		r3_scores = [batch_scores[itemgetter(*to_neigh)(id_mapping), :].view(-1, 2) for to_neigh in r3_list]
 
 		# count the number of neighbors kept for aggregation for each batch node and relation
+		# 각 relation에 따른 타겟 노드의 이웃 선택 비율을 threshold를 통해 조정한다.
+		"""
+		이때 해당 threshold(self.thresholds)는 RL 모듈을 통해 학습된다.
+		"""
 		r1_sample_num_list = [math.ceil(len(neighs) * self.thresholds[0]) for neighs in r1_list]
 		r2_sample_num_list = [math.ceil(len(neighs) * self.thresholds[1]) for neighs in r2_list]
 		r3_sample_num_list = [math.ceil(len(neighs) * self.thresholds[2]) for neighs in r3_list]
 
 		# intra-aggregation steps for each relation
 		# Eq. (8) in the paper
+		# 배치를 구성하는 타겟 노드들의 이웃 노드의 인덱스와 similarity secore를 통해 intra aggregation을 수행한다.
+		# 이때 최종적으로 반환되는 것은 배치에 대한 각 relation별 embedding과 similarity score(RL 모듈 학습과 어떻게 연관 되는지 확인 필요)이다.  
 		r1_feats, r1_scores = self.intra_agg1.forward(nodes, r1_list, center_scores, r1_scores, r1_sample_num_list)
 		r2_feats, r2_scores = self.intra_agg2.forward(nodes, r2_list, center_scores, r2_scores, r2_sample_num_list)
 		r3_feats, r3_scores = self.intra_agg3.forward(nodes, r3_list, center_scores, r3_scores, r3_sample_num_list)
 
 		# concat the intra-aggregated embeddings from each relation
+		# 각 relation을 이용해 생성된 embedding을 concatenation하여 neigh_feats를 정의한다.
 		neigh_feats = torch.cat((r1_feats, r2_feats, r3_feats), dim=0)
 
 		# get features or embeddings for batch nodes
@@ -145,6 +165,9 @@ class InterAgg(nn.Module):
 
 		# inter-relation aggregation steps
 		# Eq. (9) in the paper
+		"""
+		Aggregator를 선택하여 이용한다. 논문에서는 각각의 aggregator를 이용하여 실험을 진행하였다.
+		"""
 		if self.inter == 'Att':
 			# 1) CARE-Att Inter-relation Aggregator
 			combined, attention = att_inter_agg(len(self.adj_lists), self.leakyrelu, self_feats, neigh_feats, self.embed_dim,
@@ -163,7 +186,7 @@ class InterAgg(nn.Module):
 			combined = threshold_inter_agg(len(self.adj_lists), self_feats, neigh_feats, self.embed_dim, self.weight, self.thresholds, n, self.cuda)
 
 		# the reinforcement learning module
-		if self.RL and train_flag:
+		if self.RL and train_flag: # 해당 RL 모듈은 각 relation에서 이용할 top-k 이웃 노드의 비율(self.thresholds)을 결정한다.
 			relation_scores, rewards, thresholds, stop_flag = RLModule([r1_scores, r2_scores, r3_scores],
 																	   self.relation_score_log, labels, self.thresholds,
 																	   self.batch_num, self.step_size)
@@ -172,7 +195,7 @@ class InterAgg(nn.Module):
 			self.relation_score_log.append(relation_scores)
 			self.thresholds_log.append(self.thresholds)
 
-		return combined, center_scores
+		return combined, center_scores # 통합된 embedding과 배치의 각 노드에 대한 label-aware score를 반환한다.
 
 
 class IntraAgg(nn.Module):
@@ -193,38 +216,51 @@ class IntraAgg(nn.Module):
 	def forward(self, nodes, to_neighs_list, batch_scores, neigh_scores, sample_list):
 		"""
 		Code partially from https://github.com/williamleif/graphsage-simple/
-		:param nodes: list of nodes in a batch
-		:param to_neighs_list: neighbor node id list for each batch node in one relation
-		:param batch_scores: the label-aware scores of batch nodes
-		:param neigh_scores: the label-aware scores 1-hop neighbors each batch node in one relation
-		:param sample_list: the number of neighbors kept for each batch node in one relation
-		:return to_feats: the aggregated embeddings of batch nodes neighbors in one relation
-		:return samp_scores: the average neighbor distances for each relation after filtering
+		:param | nodes: list of nodes in a batch
+		:param | to_neighs_list: neighbor node id list for each batch node in one relation
+		:param | batch_scores: the label-aware scores of batch nodes
+		:param | neigh_scores: the label-aware scores 1-hop neighbors each batch node in one relation
+		:param | sample_list: the number of neighbors kept for each batch node in one relation
+		
+		:return | to_feats: the aggregated embeddings of batch nodes neighbors in one relation
+		:return | samp_scores: the average neighbor distances for each relation after filtering
 		"""
 
 		# filer neighbors under given relation
+		# 배치를 구성하는 타겟 노드와 이웃 노드의 label-aware score, 이웃 노드의 인덱스 그리고 message를 이용할 노드의 수(relation에 따라 다름.).
+		# filter_neighs_ada_threshold는 최종적으로 배치에 존재하는 개별 노드에 대한 선택된 이웃 노드의 인덱스와 그들의 score diff를 반환한다.
 		samp_neighs, samp_scores = filter_neighs_ada_threshold(batch_scores, neigh_scores, to_neighs_list, sample_list)
 
 		# find the unique nodes among batch nodes and the filtered neighbors
-		unique_nodes_list = list(set.union(*samp_neighs))
+		unique_nodes_list = list(set.union(*samp_neighs)) # 선택된 노드에 동일한 인덱스의 노드가 존재할 수 있으므로 이를 제거한다 (추후 adj를 생성하여 feature를 이용하기 위함).
+		# 이웃 노드들에 대해 개별적으로 접근해야 하므로 노드 인덱스에 대한 딕셔너리를 정의한다.
 		unique_nodes = {n: i for i, n in enumerate(unique_nodes_list)}
 
 		# intra-relation aggregation only with sampled neighbors
-		mask = Variable(torch.zeros(len(samp_neighs), len(unique_nodes)))
+		mask = Variable(torch.zeros(len(samp_neighs), len(unique_nodes))) # aggregation을 위한 배치 단위의 인접 행렬을 정의한다.
+		# 배치의 각 노드에 대한 이웃 노드들에 차례로 접근하여 인덱스를 부여한다.
+		# (이때 모든 배치의 노드에 대해 하나의 리스트로 결과가 생성한다. -> column_indices)
+		# 타겟 노드의 이웃 노드의 인덱스를 하나의 리스트로 통합하여 column_indices로 정의한다.
 		column_indices = [unique_nodes[n] for samp_neigh in samp_neighs for n in samp_neigh]
+		# column_indices로에서 이웃 노드의 인덱스가 몇 번째 타겟 노드의 것인지를 지정하기 위한 row_indices를 생성한다.
 		row_indices = [i for i in range(len(samp_neighs)) for _ in range(len(samp_neighs[i]))]
+		# mask의 row는 타겟 노드의 인덱스를 의미하고, column은 이웃 노드의 인덱스를 의미한다.
+		# 배치 단위에서의 adj라고 보면 될 것 같다. 
 		mask[row_indices, column_indices] = 1
 		if self.cuda:
 			mask = mask.cuda()
+		# 각 노드의 차수를 정의한다.
 		num_neigh = mask.sum(1, keepdim=True)
+		# Mean aggregator이다.
 		mask = mask.div(num_neigh)
 		if self.cuda:
 			embed_matrix = self.features(torch.LongTensor(unique_nodes_list).cuda())
 		else:
 			embed_matrix = self.features(torch.LongTensor(unique_nodes_list))
+		# 앞서 생성한 배치 단위의 adg를 통해 노드 피처를 aggrgation 한다.
 		to_feats = mask.mm(embed_matrix)
 		to_feats = F.relu(to_feats)
-		return to_feats, samp_scores
+		return to_feats, samp_scores # 노드의 representation (가중치 없이 그냥 mean aggregation 됨.)과 각 타겟 노드에 대한 선택된 이웃 노드들의 score diff를 반환한다.
 
 
 def RLModule(scores, scores_log, labels, thresholds, batch_num, step_size):
@@ -232,46 +268,59 @@ def RLModule(scores, scores_log, labels, thresholds, batch_num, step_size):
 	The reinforcement learning module.
 	It updates the neighbor filtering threshold for each relation based
 	on the average neighbor distances between two consecutive epochs.
-	:param scores: the neighbor nodes label-aware scores for each relation
-	:param scores_log: a list stores the relation average distances for each batch
-	:param labels: the batch node labels used to select positive nodes
-	:param thresholds: the current neighbor filtering thresholds for each relation
-	:param batch_num: numbers batches in an epoch
-	:param step_size: the RL action step size
-	:return relation_scores: the relation average distances for current batch
-	:return rewards: the reward for given thresholds in current epoch
-	:return new_thresholds: the new filtering thresholds updated according to the rewards
-	:return stop_flag: the RL terminal condition flag
+	:param |scores: the neighbor nodes label-aware scores for each relation
+	:param |scores_log: a list stores the relation average distances for each batch
+	:param |labels: the batch node labels used to select positive nodes
+	:param |thresholds: the current neighbor filtering thresholds for each relation
+	:param |batch_num: numbers batches in an epoch
+	:param |step_size: the RL action step size
+	:return | relation_scores: the relation average distances for current batch
+	:return | rewards: the reward for given thresholds in current epoch
+	:return | new_thresholds: the new filtering thresholds updated according to the rewards
+	:return | stop_flag: the RL terminal condition flag
 	"""
+	# RLModule([r1_scores, r2_scores, r3_scores],self.relation_score_log,
+	#    labels, self.thresholds,self.batch_num, self.step_size)
 
 	relation_scores = []
 	stop_flag = True
 
 	# only compute the average neighbor distances for positive nodes
 	pos_index = (labels == 1).nonzero().tolist()
-	pos_index = [i[0] for i in pos_index]
+	pos_index = [i[0] for i in pos_index] # 배치 내에서 positive sample의 인덱스를 찾고 pos_index로 정의한다.
 
 	# compute average neighbor distances for each relation
 	for score in scores:
+		# 각 노드의 relation에 해당하는 label-aware score에 대하여
+		# Positive sample의 인덱스() 통해 배치 노드 중에서 score diff를 기준으로 정렬한다.
 		pos_scores = itemgetter(*pos_index)(score)
-		neigh_count = sum([1 if isinstance(i, float) else len(i) for i in pos_scores])
-		pos_sum = [i if isinstance(i, float) else sum(i) for i in pos_scores]
-		relation_scores.append(sum(pos_sum) / neigh_count)
 
+		# 배치에 존재하는 positive sample의 수를 카운팅하여 neigh_count로 정의한다.
+		neigh_count = sum([1 if isinstance(i, float) else len(i) for i in pos_scores])
+		# 배치에 존재하는 positive sample의 score diff를 pos_sum으로 정의한다.
+		pos_sum = [i if isinstance(i, float) else sum(i) for i in pos_scores]
+		# neigh_count와 pos_sum은 인덱스가 맞게 설정된다.
+		
+		# 해당 relation으로 연결된 이웃들의 정보를 통해 계산된 노드들의 label aware score 평균을 relation_scores에 append 한다.
+		relation_scores.append(sum(pos_sum) / neigh_count)
+	"""
+	# do not call RL module within the epoch or within the first two epochs!!!!
+	"""
 	if len(scores_log) % batch_num != 0 or len(scores_log) < 2 * batch_num:
-		# do not call RL module within the epoch or within the first two epochs
 		rewards = [0, 0, 0]
 		new_thresholds = thresholds
 	else:
 		# update thresholds according to average scores in last epoch
 		# Eq.(5) in the paper
-		previous_epoch_scores = [sum(s) / batch_num for s in zip(*scores_log[-2 * batch_num:-batch_num])]
-		current_epoch_scores = [sum(s) / batch_num for s in zip(*scores_log[-batch_num:])]
+		previous_epoch_scores = [sum(s) / batch_num for s in zip(*scores_log[-2 * batch_num:-batch_num])] # 이전 배치의 label aware score 평균.
+		current_epoch_scores = [sum(s) / batch_num for s in zip(*scores_log[-batch_num:])] # 현재 배치의 label aware score 평균.
 
 		# compute reward for each relation and update the thresholds according to reward
 		# Eq. (6) in the paper
+		# 논문에 제시된 stochastic reward에 대한 부분으로 평균 label aware score의 향상에 따른 reward 정의
 		rewards = [1 if previous_epoch_scores[i] - s >= 0 else -1 for i, s in enumerate(current_epoch_scores)]
-		new_thresholds = [thresholds[i] + step_size if r == 1 else thresholds[i] - step_size for i, r in enumerate(rewards)]
+		# 지정된 step size를 통해 action을 하여 relation별 threshold를 조정한다.
+		new_thresholds = [thresholds[i] + step_size if r == 1 else thresholds[i] - step_size for i, r in enumerate(rewards)] 
 
 		# avoid overflow
 		new_thresholds = [0.999 if i > 1 else i for i in new_thresholds]
@@ -283,7 +332,7 @@ def RLModule(scores, scores_log, labels, thresholds, batch_num, step_size):
 
 	# TODO: add terminal condition
 
-	return relation_scores, rewards, new_thresholds, stop_flag
+	return relation_scores, rewards, new_thresholds, stop_flag # relation별 label aware score의 평균과 relation별 reward, ., ..
 
 
 def filter_neighs_ada_threshold(center_scores, neigh_scores, neighs_list, sample_list):
@@ -299,34 +348,40 @@ def filter_neighs_ada_threshold(center_scores, neigh_scores, neighs_list, sample
 
 	samp_neighs = []
 	samp_scores = []
-	for idx, center_score in enumerate(center_scores):
-		center_score = center_scores[idx][0]
-		neigh_score = neigh_scores[idx][:, 0].view(-1, 1)
-		center_score = center_score.repeat(neigh_score.size()[0], 1)
-		neighs_indices = neighs_list[idx]
-		num_sample = sample_list[idx]
+	for idx, center_score in enumerate(center_scores): # 배치를 구성하는 각 타겟 노드의 label-aware score
+		center_score = center_scores[idx][0] # 타겟 노드의 label-aware score [0]
+		neigh_score = neigh_scores[idx][:, 0].view(-1, 1) # 타겟 노드의 이웃 노드들의 label-aware score [0]
+		center_score = center_score.repeat(neigh_score.size()[0], 1) #  이웃 노드의 수 만큼 타겟 노드의 label-aware score를 확장한다.
+		neighs_indices = neighs_list[idx] # 이웃 노드의 인덱스를 neighs_indices로 저장한다.
+		num_sample = sample_list[idx] # 타겟 노드에 대하여 message를 이용할 이웃 노드의 수를 num_sample로 저장한다.
 
 		# compute the L1-distance of batch nodes and their neighbors
 		# Eq. (2) in paper
+		# 각 타겟 노드에 대하여 이웃 노드와의 labe-aware score의 차이를 게산하고 score_diff로 정의 한다.
 		score_diff = torch.abs(center_score - neigh_score).squeeze()
-		sorted_scores, sorted_indices = torch.sort(score_diff, dim=0, descending=False)
-		selected_indices = sorted_indices.tolist()
+		sorted_scores, sorted_indices = torch.sort(score_diff, dim=0, descending=False) # 그 값을 기준으로 인덱스를 정렬한다 (오룸차순으로).
+		selected_indices = sorted_indices.tolist() # 정렬된 인덱스를 selected_indices로 정의한다.
 
 		# top-p sampling according to distance ranking and thresholds
 		# Section 3.3.1 in paper
+		# 
 		if len(neigh_scores[idx]) > num_sample + 1:
+			# 선택된 이웃 노드들의 인덱스를 selected_neighs로 정의한다
 			selected_neighs = [neighs_indices[n] for n in selected_indices[:num_sample]]
+			# 선택된 이웃 노드들과 타겟 노드와의 score 차이를  selected_score_diff로 정의한다.
 			selected_scores = sorted_scores.tolist()[:num_sample]
 		else:
+			# 타겟 노드의 이웃 노드가 1개 혹은 singleton 노드일 경우
 			selected_neighs = neighs_indices
 			selected_scores = score_diff.tolist()
 			if isinstance(selected_scores, float):
 				selected_scores = [selected_scores]
 
+		# 노드들의 선택된 neighbor와 그들의 score diff를 저장한다
 		samp_neighs.append(set(selected_neighs))
 		samp_scores.append(selected_scores)
 
-	return samp_neighs, samp_scores
+	return samp_neighs, samp_scores # 배치에 존재하는 각 노드들의 이웃의 인덱스와 그들의 score diff를 반환한다.
 
 
 def mean_inter_agg(num_relations, self_feats, neigh_feats, embed_dim, weight, n, cuda):

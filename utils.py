@@ -6,11 +6,42 @@ from scipy.io import loadmat
 import copy as cp
 from sklearn.metrics import f1_score, accuracy_score, recall_score, roc_auc_score, average_precision_score
 from collections import defaultdict
+from datetime import datetime
+import os
+
 
 
 """
 	Utility functions to handle data and evaluate model.
 """
+class log:
+	def __init__(self):
+		self.log_dir_path = "./log"
+		self.log_file_name = datetime.now().strftime("%Y-%m-%d %H:%M") + ".log"
+		self.train_log_path = os.path.join(self.log_dir_path, "train", self.log_file_name)
+		self.test_log_path = os.path.join(self.log_dir_path, "test", self.log_file_name)
+		self.multi_run_log_path = os.path.join(self.log_dir_path, "multiple-run", self.log_file_name)
+	
+	def write_train_log(self, line, print_line=True):
+		if print_line:
+			print(line)
+		log_file = open(self.train_log_path, 'a')
+		log_file.write(line + "\n")
+		log_file.close()
+
+	def write_test_log(self, line, print_line=True):
+		if print_line:
+			print(line)
+		log_file = open(self.test_log_path, 'a')
+		log_file.write(line + "\n")
+		log_file.close()
+	
+	def multi_run_log(self, line, print_line=True):
+		if print_line:
+			print(line)
+		log_file = open(self.multi_run_log_path, 'a')
+		log_file.write(line + "\n")
+		log_file.close()
 
 
 def load_data(data):
@@ -37,6 +68,8 @@ def load_data(data):
 		with open(prefix + 'yelp_rsr_adjlists.pickle', 'rb') as file:
 			relation3 = pickle.load(file)
 		file.close()
+		relation_list = [relation1, relation2, relation3]
+
 	elif data == 'amazon':
 		data_file = loadmat(prefix + 'Amazon.mat')
 		labels = data_file['label'].flatten()
@@ -53,8 +86,10 @@ def load_data(data):
 		file.close()
 		with open(prefix + 'amz_uvu_adjlists.pickle', 'rb') as file:
 			relation3 = pickle.load(file)
+		file.close()
+		relation_list = [relation1, relation2, relation3]
 
-	return [homo, relation1, relation2, relation3], feat_data, labels
+	return homo, relation_list, feat_data, labels
 
 
 def normalize(mx):
