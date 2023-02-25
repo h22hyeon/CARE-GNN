@@ -20,7 +20,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 parser = argparse.ArgumentParser()
 
 # dataset and model dependent args
-parser.add_argument('--data', type=str, default='yelp', help='The dataset name. [yelp, amazon]')
+parser.add_argument('--data_name', type=str, default='yelp', help='The dataset name. [yelp, amazon]')
 parser.add_argument('--model', type=str, default='CARE', help='The model name. [CARE, SAGE]')
 parser.add_argument('--inter', type=str, default='GNN', help='The inter-relation aggregator type. [Att, Weight, Mean, GNN]')
 parser.add_argument('--batch-size', type=int, default=1024, help='Batch size 1024 for yelp, 256 for amazon.')
@@ -36,6 +36,7 @@ parser.add_argument('--test-epochs', type=int, default=3, help='Epoch interval t
 parser.add_argument('--under-sample', type=int, default=1, help='Under-sampling scale.')
 parser.add_argument('--step-size', type=float, default=2e-2, help='RL action step size')
 
+
 # other args
 parser.add_argument('--no-cuda', action='store_true', default=False, help='Disables CUDA training.')
 parser.add_argument('--seed', type=int, default=72, help='Random seed.')
@@ -43,10 +44,10 @@ parser.add_argument('--seed', type=int, default=72, help='Random seed.')
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
-print(f'run on {args.data}')
+print(f'run on {args.data_name}')
 
 # load graph, feature, and label (relation list로 여러 타입의 relation을 받아오도록 변경함.)
-homo, relation_list, feat_data, labels = load_data(args.data)
+homo, relation_list, feat_data, labels = load_data(args.data_name)
 
 # train_test split
 np.random.seed(args.seed)
@@ -59,24 +60,20 @@ ckp.write_valid_log(config_lines, print_line=False)
 ckp.write_test_log(config_lines, print_line=False)
 
 # Label의 비율을 동일하게 가져가기 위해 계층적 샘플링을 수행한다.
-if args.data == 'yelp':
+if args.data_name == 'yelp':
 	index = list(range(len(labels)))
-	# idx_train, idx_test, y_train, y_test = train_test_split(index, labels, stratify=labels, test_size=0.60,
-	# 														random_state=2, shuffle=True)
-	idx_train, idx_rest, y_train, y_rest = train_test_split(index, labels, stratify=labels, train_size=args.train_ratio,
+	idx_train, idx_rest, y_train, y_rest = train_test_split(index, labels, stratify=labels, train_size=0.4,
 																	random_state=2, shuffle=True)
-	idx_valid, idx_test, y_valid, y_test = train_test_split(idx_rest, y_rest, stratify=y_rest, test_size=args.test_ratio,
+	idx_valid, idx_test, y_valid, y_test = train_test_split(idx_rest, y_rest, stratify=y_rest, test_size=0.66,
 																	random_state=2, shuffle=True)
 
-elif args.data == 'amazon':  # amazon
+elif args.data_name == 'amazon':  # amazon
 	# 0-3304 are unlabeled nodes - Amazon 데이터 셋은 unlabeld 노드가 존재한다.
 	index = list(range(3305, len(labels)))
-	# idx_train, idx_test, y_train, y_test = train_test_split(index, labels[3305:], stratify=labels[3305:],
-	# 														test_size=0.60, random_state=2, shuffle=True)
 	idx_train, idx_rest, y_train, y_rest = train_test_split(index, labels[3305:], stratify=labels[3305:],
-																	train_size=args.train_ratio, random_state=2, shuffle=True)
+																	train_size=0.4, random_state=2, shuffle=True)
 	idx_valid, idx_test, y_valid, y_test = train_test_split(idx_rest, y_rest, stratify=y_rest,
-																	test_size=args.test_ratio, random_state=2, shuffle=True)
+																	test_size=0.66, random_state=2, shuffle=True)
 
 print(f'Run on {args.data_name}, postive/total num: {np.sum(labels)}/{len(labels)}, train num {len(y_train)},'+
 			f'valid num {len(y_valid)}, test num {len(y_test)}, test positive num {np.sum(y_test)}')

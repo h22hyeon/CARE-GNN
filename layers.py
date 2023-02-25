@@ -326,9 +326,9 @@ def RLModule(scores, scores_log, labels, thresholds, batch_num, step_size):
 		new_thresholds = [0.999 if i > 1 else i for i in new_thresholds]
 		new_thresholds = [0.001 if i < 0 else i for i in new_thresholds]
 
-		print(f'epoch scores: {current_epoch_scores}')
-		print(f'rewards: {rewards}')
-		print(f'thresholds: {new_thresholds}')
+		# print(f'epoch scores: {current_epoch_scores}')
+		# print(f'rewards: {rewards}')
+		# print(f'thresholds: {new_thresholds}')
 
 	# TODO: add terminal condition
 
