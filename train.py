@@ -167,7 +167,7 @@ for epoch in range(args.num_epochs):
 	Test 과정에 대한 알고리즘은 utils.py에서 확인할 수 있다.
 	"""
 	# Valid the model for every $valid_epoch$ epoch
-	if epoch % args.valid_epochs == 0:
+	if (epoch+1) % args.valid_epochs == 0:
 		if args.model == 'SAGE' or args.model == 'GCN':
 			print("Valid at epoch {}".format(epoch))
 			gnn_auc_val, gnn_recall_val, gnn_f1_val = test_sage(idx_test, y_test, gnn_model, args.batch_size, ckp, flag="val")
