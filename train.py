@@ -30,9 +30,9 @@ parser.add_argument('--lr', type=float, default=0.01, help='Initial learning rat
 parser.add_argument('--lambda_1', type=float, default=2, help='Simi loss weight.')
 parser.add_argument('--lambda_2', type=float, default=1e-3, help='Weight decay (L2 loss weight).')
 parser.add_argument('--emb-size', type=int, default=64, help='Node embedding size at the last layer.')
-parser.add_argument('--num-epochs', type=int, default=31, help='Number of epochs.')
+parser.add_argument('--num-epochs', type=int, default=101, help='Number of epochs.')
 parser.add_argument('--valid_epochs', type=int, default=10, help='Number of epochs.')
-parser.add_argument('--test-epochs', type=int, default=3, help='Epoch interval to run test set.')
+parser.add_argument('--test-epochs', type=int, default=5, help='Epoch interval to run test set.')
 parser.add_argument('--under-sample', type=int, default=1, help='Under-sampling scale.')
 parser.add_argument('--step-size', type=float, default=2e-2, help='RL action step size')
 
@@ -64,7 +64,7 @@ if args.data_name == 'yelp':
 	index = list(range(len(labels)))
 	idx_train, idx_rest, y_train, y_rest = train_test_split(index, labels, stratify=labels, train_size=0.4,
 																	random_state=2, shuffle=True)
-	idx_valid, idx_test, y_valid, y_test = train_test_split(idx_rest, y_rest, stratify=y_rest, test_size=0.66,
+	idx_valid, idx_test, y_valid, y_test = train_test_split(idx_rest, y_rest, stratify=y_rest, test_size=0.67,
 																	random_state=2, shuffle=True)
 
 elif args.data_name == 'amazon':  # amazon
@@ -73,7 +73,7 @@ elif args.data_name == 'amazon':  # amazon
 	idx_train, idx_rest, y_train, y_rest = train_test_split(index, labels[3305:], stratify=labels[3305:],
 																	train_size=0.4, random_state=2, shuffle=True)
 	idx_valid, idx_test, y_valid, y_test = train_test_split(idx_rest, y_rest, stratify=y_rest,
-																	test_size=0.66, random_state=2, shuffle=True)
+																	test_size=0.67, random_state=2, shuffle=True)
 
 print(f'Run on {args.data_name}, postive/total num: {np.sum(labels)}/{len(labels)}, train num {len(y_train)},'+
 			f'valid num {len(y_valid)}, test num {len(y_test)}, test positive num {np.sum(y_test)}')
@@ -188,7 +188,7 @@ for epoch in range(args.num_epochs):
 				print('  Saving model ...')
 				torch.save(gnn_model.state_dict(), path_saver)
 
-	if args.model == 'SAGE':
-		gnn_auc, gnn_recall, gnn_f1 = test_sage(idx_test, y_test, gnn_model, args.batch_size, ckp, flag="test")
-	else:
-		 gnn_auc, gnn_recall, gnn_f1 = test_care(idx_test, y_test, gnn_model, args.batch_size, ckp, flag="test")
+if args.model == 'SAGE':
+	gnn_auc, gnn_recall, gnn_f1 = test_sage(idx_test, y_test, gnn_model, args.batch_size, ckp, flag="test")
+else:
+		gnn_auc, gnn_recall, gnn_f1 = test_care(idx_test, y_test, gnn_model, args.batch_size, ckp, flag="test")
