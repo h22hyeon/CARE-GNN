@@ -19,13 +19,25 @@ class log:
 		self.log_dir_path = "./log"
 		self.log_file_name = datetime.now().strftime("%Y-%m-%d %H:%M") + ".log"
 		self.train_log_path = os.path.join(self.log_dir_path, "train", self.log_file_name)
+		self.valid_log_path = os.path.join(self.log_dir_path, "valid", self.log_file_name)
 		self.test_log_path = os.path.join(self.log_dir_path, "test", self.log_file_name)
-		self.multi_run_log_path = os.path.join(self.log_dir_path, "multiple-run", self.log_file_name)
-	
+		self.multi_run_log_path = os.path.join(self.log_dir_path, "multi-run(total)", self.log_file_name)
+		os.makedirs(os.path.join(self.log_dir_path, "train"), exist_ok=True)
+		os.makedirs(os.path.join(self.log_dir_path, "valid"), exist_ok=True)
+		os.makedirs(os.path.join(self.log_dir_path, "test"), exist_ok=True)
+		os.makedirs(os.path.join(self.log_dir_path, "multiple-run"), exist_ok=True)
+
 	def write_train_log(self, line, print_line=True):
 		if print_line:
 			print(line)
 		log_file = open(self.train_log_path, 'a')
+		log_file.write(line + "\n")
+		log_file.close()
+
+	def write_valid_log(self, line, print_line=True):
+		if print_line:
+			print(line)
+		log_file = open(self.valid_log_path, 'a')
 		log_file.write(line + "\n")
 		log_file.close()
 
@@ -43,6 +55,19 @@ class log:
 		log_file.write(line + "\n")
 		log_file.close()
 
+def print_config(config):
+    print("**************** MODEL CONFIGURATION ****************")
+    # Configuration 파일을 불러와 train setting을 출력한다.
+    config_lines = ""
+    for key in sorted(config.keys()):
+        val = config[key]
+        keystr = "{}".format(key) + (" " * (24 - len(key)))
+        line = "{} -->   {}\n".format(keystr, val)
+        config_lines += line
+        print(line)
+    print("**************** MODEL CONFIGURATION ****************")
+    
+    return config_lines
 
 def load_data(data):
 	"""
@@ -158,7 +183,7 @@ def undersample(pos_nodes, neg_nodes, scale=1):
 	return batch_nodes
 
 
-def test_sage(test_cases, labels, model, batch_size):
+def test_sage(test_cases, labels, model, batch_size, ckp, flag=None):
 	"""
 	Test the performance of GraphSAGE
 	:param test_cases: a list of testing node
@@ -185,14 +210,18 @@ def test_sage(test_cases, labels, model, batch_size):
 
 	auc_gnn = roc_auc_score(labels, np.array(gnn_list))
 	ap_gnn = average_precision_score(labels, np.array(gnn_list))
-	print(f"GNN F1: {f1_gnn / test_batch_num:.4f}")
-	print(f"GNN Accuracy: {acc_gnn / test_batch_num:.4f}")
-	print(f"GNN Recall: {recall_gnn / test_batch_num:.4f}")
-	print(f"GNN auc: {auc_gnn:.4f}")
-	print(f"GNN ap: {ap_gnn:.4f}")
+	line1= f"GNN F1: {f1_gnn / test_batch_num:.4f}"+"\tGNN Accuracy: {acc_gnn / test_batch_num:.4f}"+\
+       f"\tGNN Recall: {recall_gnn / test_batch_num:.4f}\tGNN auc: {auc_gnn:.4f}\tGNN ap: {ap_gnn:.4f}"
+		
+	if flag=="val":
+		ckp.write_valid_log(line1)
+
+	elif flag=="test":
+		ckp.write_test_log(line1)
+	return auc_gnn,(recall_gnn / test_batch_num), (f1_gnn / test_batch_num)
 
 
-def test_care(test_cases, labels, model, batch_size):
+def test_care(test_cases, labels, model, batch_size, ckp, flag=None):
 	"""
 	Test the performance of CARE-GNN and its variants
 	:param test_cases: a list of testing node
@@ -217,6 +246,8 @@ def test_care(test_cases, labels, model, batch_size):
 		i_end = min((iteration + 1) * batch_size, len(test_cases))
 		batch_nodes = test_cases[i_start:i_end]
 		batch_label = labels[i_start:i_end]
+
+		# 학습된 CARE-GNN 모델을 통해 반환되는 GNN score와 label-aware score를 통해 성능 평가를 수행한다.
 		gnn_prob, label_prob1 = model.to_prob(batch_nodes, batch_label, train_flag=False)
 
 		f1_gnn += f1_score(batch_label, gnn_prob.data.cpu().numpy().argmax(axis=1), average="macro")
@@ -234,15 +265,17 @@ def test_care(test_cases, labels, model, batch_size):
 	ap_gnn = average_precision_score(labels, np.array(gnn_list))
 	auc_label1 = roc_auc_score(labels, np.array(label_list1))
 	ap_label1 = average_precision_score(labels, np.array(label_list1))
-	print(f"GNN F1: {f1_gnn / test_batch_num:.4f}")
-	print(f"GNN Accuracy: {acc_gnn / test_batch_num:.4f}")
-	print(f"GNN Recall: {recall_gnn / test_batch_num:.4f}")
-	print(f"GNN auc: {auc_gnn:.4f}")
-	print(f"GNN ap: {ap_gnn:.4f}")
-	print(f"Label1 F1: {f1_label1 / test_batch_num:.4f}")
-	print(f"Label1 Accuracy: {acc_label1 / test_batch_num:.4f}")
-	print(f"Label1 Recall: {recall_label1 / test_batch_num:.4f}")
-	print(f"Label1 auc: {auc_label1:.4f}")
-	print(f"Label1 ap: {ap_label1:.4f}")
+	
+	line1= f"GNN F1: {f1_gnn / test_batch_num:.4f}"+"\tGNN Accuracy: {acc_gnn / test_batch_num:.4f}"+\
+       f"\tGNN Recall: {recall_gnn / test_batch_num:.4f}\tGNN auc: {auc_gnn:.4f}\tGNN ap: {ap_gnn:.4f}"
+	line2 = f"Label1 F1: {f1_label1 / test_batch_num:.4f}\tLabel1 Accuracy: {acc_label1 / test_batch_num:.4f}"+\
+       f"\tLabel1 Recall: {recall_label1 / test_batch_num:.4f}\tLabel1 auc: {auc_label1:.4f}\tLabel1 ap: {ap_label1:.4f}"
+	
+	if flag=="val":
+		ckp.write_valid_log(line1)
+		ckp.write_valid_log(line2)
+	elif flag=="test":
+		ckp.write_test_log(line1)
+		ckp.write_test_log(line2)
 
-	return auc_gnn, auc_label1, recall_gnn, recall_label1
+	return auc_gnn, recall_gnn, (f1_gnn / test_batch_num)

@@ -31,6 +31,7 @@ parser.add_argument('--lambda_1', type=float, default=2, help='Simi loss weight.
 parser.add_argument('--lambda_2', type=float, default=1e-3, help='Weight decay (L2 loss weight).')
 parser.add_argument('--emb-size', type=int, default=64, help='Node embedding size at the last layer.')
 parser.add_argument('--num-epochs', type=int, default=31, help='Number of epochs.')
+parser.add_argument('--valid_epochs', type=int, default=10, help='Number of epochs.')
 parser.add_argument('--test-epochs', type=int, default=3, help='Epoch interval to run test set.')
 parser.add_argument('--under-sample', type=int, default=1, help='Under-sampling scale.')
 parser.add_argument('--step-size', type=float, default=2e-2, help='RL action step size')
@@ -51,16 +52,34 @@ homo, relation_list, feat_data, labels = load_data(args.data)
 np.random.seed(args.seed)
 random.seed(args.seed)
 
+ckp = log()
+config_lines = print_config(vars(args))
+ckp.write_train_log(config_lines, print_line=False)
+ckp.write_valid_log(config_lines, print_line=False)
+ckp.write_test_log(config_lines, print_line=False)
+
 # Label의 비율을 동일하게 가져가기 위해 계층적 샘플링을 수행한다.
 if args.data == 'yelp':
 	index = list(range(len(labels)))
-	idx_train, idx_test, y_train, y_test = train_test_split(index, labels, stratify=labels, test_size=0.60,
-															random_state=2, shuffle=True)
+	# idx_train, idx_test, y_train, y_test = train_test_split(index, labels, stratify=labels, test_size=0.60,
+	# 														random_state=2, shuffle=True)
+	idx_train, idx_rest, y_train, y_rest = train_test_split(index, labels, stratify=labels, train_size=args.train_ratio,
+																	random_state=2, shuffle=True)
+	idx_valid, idx_test, y_valid, y_test = train_test_split(idx_rest, y_rest, stratify=y_rest, test_size=args.test_ratio,
+																	random_state=2, shuffle=True)
+
 elif args.data == 'amazon':  # amazon
 	# 0-3304 are unlabeled nodes - Amazon 데이터 셋은 unlabeld 노드가 존재한다.
 	index = list(range(3305, len(labels)))
-	idx_train, idx_test, y_train, y_test = train_test_split(index, labels[3305:], stratify=labels[3305:],
-															test_size=0.60, random_state=2, shuffle=True)
+	# idx_train, idx_test, y_train, y_test = train_test_split(index, labels[3305:], stratify=labels[3305:],
+	# 														test_size=0.60, random_state=2, shuffle=True)
+	idx_train, idx_rest, y_train, y_rest = train_test_split(index, labels[3305:], stratify=labels[3305:],
+																	train_size=args.train_ratio, random_state=2, shuffle=True)
+	idx_valid, idx_test, y_valid, y_test = train_test_split(idx_rest, y_rest, stratify=y_rest,
+																	test_size=args.test_ratio, random_state=2, shuffle=True)
+
+print(f'Run on {args.data_name}, postive/total num: {np.sum(labels)}/{len(labels)}, train num {len(y_train)},'+
+			f'valid num {len(y_valid)}, test num {len(y_test)}, test positive num {np.sum(y_test)}')
 
 # split pos neg sets for under-sampling
 train_pos, train_neg = pos_neg_split(idx_train, y_train) # Training set에서 positive/negative sample에 대한 인덱스를 구분한다.
@@ -103,7 +122,11 @@ if args.cuda:
 
 optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, gnn_model.parameters()), lr=args.lr, weight_decay=args.lambda_2)
 times = []
-performance_log = []
+
+dir_saver = os.path.join("/data/CARE-GNN_models/", ckp.log_file_name)
+os.makedirs(dir_saver,exist_ok=True)
+path_saver = os.path.join(dir_saver, '{}_{}.pkl'.format(args.data_name, args.model))
+f1_mac_best, auc_best, ep_best = 0, 0, -1
 
 # train the model
 for epoch in range(args.num_epochs):
@@ -120,6 +143,9 @@ for epoch in range(args.num_epochs):
 	epoch_time = 0
 
 	# mini-batch training
+	"""
+	자세한 학습 알고리즘은 layers.py를 통해 확인할 수 있다. 
+	"""
 	for batch in range(num_batches):
 		start_time = time.time()
 		i_start = batch * args.batch_size
@@ -140,10 +166,32 @@ for epoch in range(args.num_epochs):
 
 	print(f'Epoch: {epoch}, loss: {loss.item() / num_batches}, time: {epoch_time}s')
 
-	# testing the model for every $test_epoch$ epoch
-	if epoch % args.test_epochs == 0:
-		if args.model == 'SAGE':
-			test_sage(idx_test, y_test, gnn_model, args.batch_size)
+	"""
+	Test 과정에 대한 알고리즘은 utils.py에서 확인할 수 있다.
+	"""
+	# Valid the model for every $valid_epoch$ epoch
+	if epoch % args.valid_epochs == 0:
+		if args.model == 'SAGE' or args.model == 'GCN':
+			print("Valid at epoch {}".format(epoch))
+			gnn_auc_val, gnn_recall_val, gnn_f1_val = test_sage(idx_test, y_test, gnn_model, args.batch_size, ckp, flag="val")
+			if gnn_auc_val > auc_best:
+				gnn_recall_best, f1_mac_best, auc_best, ep_best = gnn_recall_val, gnn_f1_val, gnn_auc_val, epoch
+				if not os.path.exists(dir_saver):
+					os.makedirs(dir_saver)
+				print('  Saving model ...')
+				torch.save(gnn_model.state_dict(), path_saver)
+		# CARE-GNN을 학습할 경우의 test!
 		else:
-			gnn_auc, label_auc, gnn_recall, label_recall = test_care(idx_test, y_test, gnn_model, args.batch_size)
-			performance_log.append([gnn_auc, label_auc, gnn_recall, label_recall])
+			print("Valid at epoch {}".format(epoch))
+			gnn_auc_val, gnn_recall_val, gnn_f1_val = test_care(idx_test, y_test, gnn_model, args.batch_size, ckp, flag="val")
+			if gnn_auc_val > auc_best:
+				gnn_recall_best, f1_mac_best, auc_best, ep_best = gnn_recall_val, gnn_f1_val, gnn_auc_val, epoch
+				if not os.path.exists(dir_saver):
+					os.makedirs(dir_saver)
+				print('  Saving model ...')
+				torch.save(gnn_model.state_dict(), path_saver)
+
+	if args.model == 'SAGE':
+		gnn_auc, gnn_recall, gnn_f1 = test_sage(idx_test, y_test, gnn_model, args.batch_size, ckp, flag="test")
+	else:
+		 gnn_auc, gnn_recall, gnn_f1 = test_care(idx_test, y_test, gnn_model, args.batch_size, ckp, flag="test")
