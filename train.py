@@ -45,13 +45,13 @@ torch.cuda.set_device(device)
 print(f'run on {args.data_name}')
 
 # load graph, feature, and label (relation list로 여러 타입의 relation을 받아오도록 변경함.)
-homo, relation_list, feat_data, labels = load_data(args.data_name)
+homo, relation_list, feat_data, labels = load_data(args.data_name, graph_id=args.graph_id)
 
 # train_test split
 np.random.seed(args.seed)
 random.seed(args.seed)
 
-ckp = log()
+ckp = log(args.model)
 config_lines = print_config(vars(args))
 ckp.write_train_log(config_lines, print_line=False)
 ckp.write_valid_log(config_lines, print_line=False)
