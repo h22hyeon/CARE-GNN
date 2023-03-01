@@ -40,6 +40,8 @@ parser.add_argument('--cuda_id', type=int, default=0, help='GPU index')
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
+device = torch.device(f'cuda:{args.cuda_id}' if torch.cuda.is_available() else 'cpu')
+torch.cuda.set_device(device)
 print(f'run on {args.data_name}')
 
 # load graph, feature, and label (relation list로 여러 타입의 relation을 받아오도록 변경함.)
@@ -81,6 +83,7 @@ train_pos, train_neg = pos_neg_split(idx_train, y_train) # Training set에서 po
 features = nn.Embedding(feat_data.shape[0], feat_data.shape[1])
 feat_data = normalize(feat_data) # feature를 Row-normalize sparse matrix로 변환한다. 
 features.weight = nn.Parameter(torch.FloatTensor(feat_data), requires_grad=False) # feature를 임베딩한다 (고정).
+
 if args.cuda:
 	features.cuda()
 
