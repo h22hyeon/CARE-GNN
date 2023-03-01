@@ -20,26 +20,22 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 parser = argparse.ArgumentParser()
 
 # dataset and model dependent args
-parser.add_argument('--data_name', type=str, default='yelp', help='The dataset name. [yelp, amazon]')
+parser.add_argument('--data_name', type=str, default='KDK', help='The dataset name. [yelp, amazon]')
 parser.add_argument('--model', type=str, default='CARE', help='The model name. [CARE, SAGE]')
 parser.add_argument('--inter', type=str, default='GNN', help='The inter-relation aggregator type. [Att, Weight, Mean, GNN]')
+parser.add_argument('--seed', type=int, default=72, help='Random seed.')
 parser.add_argument('--batch-size', type=int, default=1024, help='Batch size 1024 for yelp, 256 for amazon.')
-
-# hyper-parameters
 parser.add_argument('--lr', type=float, default=0.01, help='Initial learning rate.')
 parser.add_argument('--lambda_1', type=float, default=2, help='Simi loss weight.')
 parser.add_argument('--lambda_2', type=float, default=1e-3, help='Weight decay (L2 loss weight).')
-parser.add_argument('--emb-size', type=int, default=64, help='Node embedding size at the last layer.')
+parser.add_argument('--emb_size', type=int, default=64, help='Node embedding size at the last layer.')
 parser.add_argument('--num-epochs', type=int, default=101, help='Number of epochs.')
 parser.add_argument('--valid_epochs', type=int, default=10, help='Number of epochs.')
-parser.add_argument('--test-epochs', type=int, default=5, help='Epoch interval to run test set.')
 parser.add_argument('--under-sample', type=int, default=1, help='Under-sampling scale.')
 parser.add_argument('--step-size', type=float, default=2e-2, help='RL action step size')
-
-
-# other args
+parser.add_argument('--graph_id', type=int, default=0, help='random seed')
 parser.add_argument('--no-cuda', action='store_true', default=False, help='Disables CUDA training.')
-parser.add_argument('--seed', type=int, default=72, help='Random seed.')
+parser.add_argument('--cuda_id', type=int, default=0, help='GPU index')
 
 
 args = parser.parse_args()
@@ -60,7 +56,7 @@ ckp.write_valid_log(config_lines, print_line=False)
 ckp.write_test_log(config_lines, print_line=False)
 
 # Label의 비율을 동일하게 가져가기 위해 계층적 샘플링을 수행한다.
-if args.data_name == 'yelp':
+if args.data_name == 'yelp' or args.data_name == 'KDK':
 	index = list(range(len(labels)))
 	idx_train, idx_rest, y_train, y_rest = train_test_split(index, labels, stratify=labels, train_size=0.4,
 																	random_state=2, shuffle=True)
@@ -97,11 +93,20 @@ else:
 print(f'Model: {args.model}, Inter-AGG: {args.inter}, emb_size: {args.emb_size}.')
 
 # build one-layer models
-if args.model == 'CARE':
+if args.model == 'CARE' and args.data_name=='KDK':
 	intra1 = IntraAgg(features, feat_data.shape[1], cuda=args.cuda)
 	intra2 = IntraAgg(features, feat_data.shape[1], cuda=args.cuda)
 	intra3 = IntraAgg(features, feat_data.shape[1], cuda=args.cuda)
-	inter1 = InterAgg(features, feat_data.shape[1], args.emb_size, adj_lists, [intra1, intra2, intra3], inter=args.inter,
+	intra4 = IntraAgg(features, feat_data.shape[1], cuda=args.cuda)
+	intra5 = IntraAgg(features, feat_data.shape[1], cuda=args.cuda)
+	inter1 = InterAgg5(features, feat_data.shape[1], args.emb_size, adj_lists, [intra1, intra2, intra3, intra4, intra5], inter=args.inter,
+					  step_size=args.step_size, cuda=args.cuda)
+	
+elif args.model == 'CARE' and (args.data_name=='yelp' or args.data_name == 'amazon'):
+	intra1 = IntraAgg(features, feat_data.shape[1], cuda=args.cuda)
+	intra2 = IntraAgg(features, feat_data.shape[1], cuda=args.cuda)
+	intra3 = IntraAgg(features, feat_data.shape[1], cuda=args.cuda)
+	inter1 = InterAgg3(features, feat_data.shape[1], args.emb_size, adj_lists, [intra1, intra2, intra3], inter=args.inter,
 					  step_size=args.step_size, cuda=args.cuda)
 elif args.model == 'SAGE':
 	agg1 = MeanAggregator(features, cuda=args.cuda)
@@ -191,4 +196,4 @@ for epoch in range(args.num_epochs):
 if args.model == 'SAGE':
 	gnn_auc, gnn_recall, gnn_f1 = test_sage(idx_test, y_test, gnn_model, args.batch_size, ckp, flag="test")
 else:
-		gnn_auc, gnn_recall, gnn_f1 = test_care(idx_test, y_test, gnn_model, args.batch_size, ckp, flag="test")
+	gnn_auc, gnn_recall, gnn_f1 = test_care(idx_test, y_test, gnn_model, args.batch_size, ckp, flag="test")

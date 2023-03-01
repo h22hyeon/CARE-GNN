@@ -1,6 +1,7 @@
 import pickle
 import random as rd
 import numpy as np
+import scipy.sparse
 import scipy.sparse as sp
 from scipy.io import loadmat
 import copy as cp
@@ -15,9 +16,11 @@ import os
 	Utility functions to handle data and evaluate model.
 """
 class log:
-	def __init__(self):
+	def __init__(self, model_name=None):
+		self.time_step = str(datetime.now())
+		self.save_dir_path = f"/data/Save_model({model_name})"
 		self.log_dir_path = "./log"
-		self.log_file_name = datetime.now().strftime("%Y-%m-%d %H:%M") + ".log"
+		self.log_file_name = f"({model_name})" + self.time_step + ".log"
 		self.train_log_path = os.path.join(self.log_dir_path, "train", self.log_file_name)
 		self.valid_log_path = os.path.join(self.log_dir_path, "valid", self.log_file_name)
 		self.test_log_path = os.path.join(self.log_dir_path, "test", self.log_file_name)
@@ -69,13 +72,11 @@ def print_config(config):
     
     return config_lines
 
-def load_data(data):
+def load_data(data, prefix = 'data/', graph_id=None):
 	"""
 	Load graph, feature, and label given dataset name
 	:returns: home and single-relation graphs, feature, label
 	"""
-
-	prefix = 'data/'
 	if data == 'yelp':
 		data_file = loadmat(prefix + 'YelpChi.mat')
 		labels = data_file['label'].flatten()
@@ -113,6 +114,28 @@ def load_data(data):
 			relation3 = pickle.load(file)
 		file.close()
 		relation_list = [relation1, relation2, relation3]
+	elif data == 'KDK':
+		postfix = "(CSC).npz"
+
+		graph_num = str(graph_id).zfill(3)
+		feature_path = os.path.join(prefix, "attributes", graph_num + "_node_feature" + postfix)
+		label_path = os.path.join(prefix, "labels", graph_num + "_label.npy")
+
+		labels = np.load(label_path).flatten()
+		feat_data = scipy.sparse.load_npz(feature_path).astype(float).todense().A
+
+		network_dir_path_hetero = os.path.join(prefix, "G0_Hetero")
+		network_type_list = ["_c_acc_c_network", "_c_clcare_c_network", "_c_fp_c_network",
+						 "_c_hsdrcare_c_network","_c_insr_c_network"]
+		network_path_list = [os.path.join(network_dir_path_hetero, graph_num + network_type_list[i] + postfix) for i in range(len(network_type_list))]
+		relation_list = [scipy.sparse.load_npz(network_path_list[i]) for i in range(len(network_path_list))]
+		for i, relation in enumerate(relation_list):
+			relation_list[i] = sparse_to_adjlist_for_train(relation + sp.eye(relation.shape[0]))
+		
+		network_dir_path_homo = os.path.join(prefix, "G0_Homo")
+		homo_network_path = os.path.join(network_dir_path_homo, graph_num + "_G0_Homo_network" + postfix)
+		homo = scipy.sparse.load_npz(homo_network_path)
+		homo = sparse_to_adjlist_for_train(homo + sp.eye(homo.shape[0]))
 
 	return homo, relation_list, feat_data, labels
 
@@ -147,6 +170,18 @@ def sparse_to_adjlist(sp_matrix, filename):
 	with open(filename, 'wb') as file:
 		pickle.dump(adj_lists, file)
 	file.close()
+
+def sparse_to_adjlist_for_train(sp_matrix): # CSC 포멧의 인접행렬을 adjlist 형태로 변환하는 함수로 학습 과정에서 사용한다.
+	# add self loop
+	homo_adj = sp_matrix + sp.eye(sp_matrix.shape[0]) 
+	# create adj_list
+	adj_lists = defaultdict(set)
+	edges = homo_adj.nonzero() # 해당 함수는 non-zero value를 갖는 인덱스 (row, col)을 리스트 퓨플로 반환한다.
+	for index, node in enumerate(edges[0]): 
+		adj_lists[node].add(edges[1][index])
+		adj_lists[edges[1][index]].add(node) # symmetric relation을 커버하기 위한 코드.
+	
+	return adj_lists
 
 
 def pos_neg_split(nodes, labels):
@@ -215,7 +250,6 @@ def test_sage(test_cases, labels, model, batch_size, ckp, flag=None):
 		
 	if flag=="val":
 		ckp.write_valid_log("Validation: "+ line1)
-
 	elif flag=="test":
 		ckp.write_test_log("Test: "+ line1)
 	return auc_gnn,(recall_gnn / test_batch_num), (f1_gnn / test_batch_num)
