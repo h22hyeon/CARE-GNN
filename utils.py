@@ -300,16 +300,19 @@ def test_care(test_cases, labels, model, batch_size, ckp, flag=None):
 	auc_label1 = roc_auc_score(labels, np.array(label_list1))
 	ap_label1 = average_precision_score(labels, np.array(label_list1))
 	
-	line1= f"GNN F1: {f1_gnn / test_batch_num:.4f}|\tGNN Accuracy: {acc_gnn / test_batch_num:.4f}|"+\
-       f"\tGNN Recall: {recall_gnn / test_batch_num:.4f}|\tGNN auc: {auc_gnn:.4f}|\tGNN ap: {ap_gnn:.4f}"
-	line2 = f"Label1 F1: {f1_label1 / test_batch_num:.4f}|\tLabel1 Accuracy: {acc_label1 / test_batch_num:.4f}|"+\
-       f"\tLabel1 Recall: {recall_label1 / test_batch_num:.4f}|\tLabel1 auc: {auc_label1:.4f}|\tLabel1 ap: {ap_label1:.4f}"
+# 	line1= f"GNN F1: {f1_gnn / test_batch_num:.4f}|\tGNN Accuracy: {acc_gnn / test_batch_num:.4f}|"+\
+#        f"\tGNN Recall: {recall_gnn / test_batch_num:.4f}|\tGNN auc: {auc_gnn:.4f}|\tGNN ap: {ap_gnn:.4f}"
+# 	line2 = f"Label1 F1: {f1_label1 / test_batch_num:.4f}|\tLabel1 Accuracy: {acc_label1 / test_batch_num:.4f}|"+\
+#        f"\tLabel1 Recall: {recall_label1 / test_batch_num:.4f}|\tLabel1 auc: {auc_label1:.4f}|\tLabel1 ap: {ap_label1:.4f}"
 	
+	line1= f"GNN F1: {f1_gnn / test_batch_num:.4f}\tGNN Accuracy: {acc_gnn / test_batch_num:.4f}"+\
+       f"\tGNN Recall: {recall_gnn / test_batch_num:.4f}\tGNN AUC-ROC: {auc_gnn:.4f}\tGNN AP: {ap_gnn:.4f}"
+
 	if flag=="val":
 		ckp.write_valid_log("Validation: "+ line1)
-		ckp.write_valid_log("Validation: "+ line2, print_line=False)
+		# ckp.write_valid_log("Validation: "+ line2, print_line=False)
 	elif flag=="test":
 		ckp.write_test_log("Test: "+ line1)
-		ckp.write_test_log("Test: "+ line2, print_line=False)
+		# ckp.write_test_log("Test: "+ line2, print_line=False)
 
 	return auc_gnn, recall_gnn, (f1_gnn / test_batch_num)

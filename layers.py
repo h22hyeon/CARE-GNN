@@ -30,7 +30,7 @@ class InterAgg5(nn.Module):
 		:param step_size: the RL action step size
 		:param cuda: whether to use GPU
 		"""
-		super(InterAgg3, self).__init__()
+		super(InterAgg5, self).__init__()
 
 		self.features = features
 		self.dropout = 0.6

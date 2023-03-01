@@ -21,7 +21,7 @@ parser = argparse.ArgumentParser()
 
 # dataset and model dependent args
 parser.add_argument('--data_name', type=str, default='KDK', help='The dataset name. [yelp, amazon]')
-parser.add_argument('--data_name', type=str, default='/data/graphs_v3', help='The dataset dir path')
+parser.add_argument('--data_dir', type=str, default='/data/graphs_v3', help='The dataset dir path')
 parser.add_argument('--model', type=str, default='CARE', help='The model name. [CARE, SAGE]')
 parser.add_argument('--inter', type=str, default='GNN', help='The inter-relation aggregator type. [Att, Weight, Mean, GNN]')
 parser.add_argument('--seed', type=int, default=72, help='Random seed.')
