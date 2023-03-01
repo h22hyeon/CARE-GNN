@@ -25,15 +25,14 @@ parser.add_argument('--data_dir', type=str, default='/data/graphs_v3', help='The
 parser.add_argument('--model', type=str, default='CARE', help='The model name. [CARE, SAGE]')
 parser.add_argument('--inter', type=str, default='GNN', help='The inter-relation aggregator type. [Att, Weight, Mean, GNN]')
 parser.add_argument('--seed', type=int, default=72, help='Random seed.')
-parser.add_argument('--batch-size', type=int, default=1024, help='Batch size 1024 for yelp, 256 for amazon.')
+parser.add_argument('--batch_size', type=int, default=1024, help='Batch size 1024 for yelp, 256 for amazon.')
 parser.add_argument('--lr', type=float, default=0.01, help='Initial learning rate.')
 parser.add_argument('--lambda_1', type=float, default=2, help='Simi loss weight.')
-parser.add_argument('--lambda_2', type=float, default=1e-3, help='Weight decay (L2 loss weight).')
+parser.add_argument('--weight_decay', type=float, default=1e-3, help='Weight decay (L2 loss weight).')
 parser.add_argument('--emb_size', type=int, default=64, help='Node embedding size at the last layer.')
-parser.add_argument('--num-epochs', type=int, default=101, help='Number of epochs.')
+parser.add_argument('--num_epochs', type=int, default=101, help='Number of epochs.')
 parser.add_argument('--valid_epochs', type=int, default=10, help='Number of epochs.')
-parser.add_argument('--under-sample', type=int, default=1, help='Under-sampling scale.')
-parser.add_argument('--step-size', type=float, default=2e-2, help='RL action step size')
+parser.add_argument('--step_size', type=float, default=2e-2, help='RL action step size')
 parser.add_argument('--graph_id', type=int, default=0, help='random seed')
 parser.add_argument('--no-cuda', action='store_true', default=False, help='Disables CUDA training.')
 parser.add_argument('--cuda_id', type=int, default=0, help='GPU index')
@@ -126,7 +125,7 @@ elif args.model == 'SAGE':
 if args.cuda:
 	gnn_model.cuda()
 
-optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, gnn_model.parameters()), lr=args.lr, weight_decay=args.lambda_2)
+optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, gnn_model.parameters()), lr=args.lr, weight_decay=args.weight_decay)
 times = []
 
 dir_saver = os.path.join("/data/CARE-GNN_models/", ckp.log_file_name)
