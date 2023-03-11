@@ -9,22 +9,22 @@ from sklearn.metrics import f1_score, accuracy_score, recall_score, roc_auc_scor
 from collections import defaultdict
 from datetime import datetime
 import os
-
+import torch
 
 
 """
 	Utility functions to handle data and evaluate model.
 """
 class log:
-	def __init__(self, model_name=None):
+	def __init__(self, model_name=None, data_name=None):
 		self.time_step = str(datetime.now())
 		self.save_dir_path = f"/data/Save_model({model_name})"
-		self.log_dir_path = "./log"
+		self.log_dir_path = f"./log({data_name}, {model_name})"
 		self.log_file_name = f"({model_name})" + self.time_step + ".log"
 		self.train_log_path = os.path.join(self.log_dir_path, "train", self.log_file_name)
 		self.valid_log_path = os.path.join(self.log_dir_path, "valid", self.log_file_name)
 		self.test_log_path = os.path.join(self.log_dir_path, "test", self.log_file_name)
-		self.multi_run_log_path = os.path.join(self.log_dir_path, "multi-run(total)", self.log_file_name)
+		self.multi_run_log_path = os.path.join(self.log_dir_path, "multiple-run", self.log_file_name)
 		os.makedirs(os.path.join(self.log_dir_path, "train"), exist_ok=True)
 		os.makedirs(os.path.join(self.log_dir_path, "valid"), exist_ok=True)
 		os.makedirs(os.path.join(self.log_dir_path, "test"), exist_ok=True)
@@ -50,14 +50,13 @@ class log:
 		log_file = open(self.test_log_path, 'a')
 		log_file.write(line + "\n")
 		log_file.close()
-	
+
 	def multi_run_log(self, line, print_line=True):
 		if print_line:
 			print(line)
 		log_file = open(self.multi_run_log_path, 'a')
 		log_file.write(line + "\n")
 		log_file.close()
-
 def print_config(config):
     print("**************** MODEL CONFIGURATION ****************")
     # Configuration 파일을 불러와 train setting을 출력한다.
@@ -71,16 +70,19 @@ def print_config(config):
     print("**************** MODEL CONFIGURATION ****************")
     
     return config_lines
-
-def load_data(data, prefix = 'data/', graph_id=None):
+ 
+def load_data(data, prefix='data/', graph_id=None):
 	"""
 	Load graph, feature, and label given dataset name
 	:returns: home and single-relation graphs, feature, label
 	"""
+	# yml 파일에 설정된 데이터셋(data_name)에 따라 label, feature, relation을 불러옴. 
 	if data == 'yelp':
-		data_file = loadmat(prefix + 'YelpChi.mat')
-		labels = data_file['label'].flatten()
-		feat_data = data_file['features'].todense().A
+		prefix = "/data/pyg/YelpChi/processed/"
+		data_file = torch.load(prefix + "YelpChi_data.pt")[0]
+		labels = np.array(data_file['review']['y'])
+		feat_data = np.array(data_file['review']['x'])
+
 		# load the preprocessed adj_lists
 		with open(prefix + 'yelp_homo_adjlists.pickle', 'rb') as file:
 			homo = pickle.load(file)
@@ -97,24 +99,76 @@ def load_data(data, prefix = 'data/', graph_id=None):
 		relation_list = [relation1, relation2, relation3]
 
 	elif data == 'amazon':
-		data_file = loadmat(prefix + 'Amazon.mat')
-		labels = data_file['label'].flatten()
-		feat_data = data_file['features'].todense().A
+		prefix = "/data/pyg/AmazonFraud/processed/"
+		data_file = torch.load(prefix + "AmazonFraud_data.pt")[0]
+
+		labels = np.array(data_file['user']['y'])
+		feat_data = np.array(data_file['user']['x'])
+
 		# load the preprocessed adj_lists
-		with open(prefix + 'amz_homo_adjlists.pickle', 'rb') as file:
+		with open(prefix + 'amazon_homo_adjlists.pickle', 'rb') as file:
 			homo = pickle.load(file)
 		file.close()
-		with open(prefix + 'amz_upu_adjlists.pickle', 'rb') as file:
+		with open(prefix + 'amazon_upu_adjlists.pickle', 'rb') as file:
 			relation1 = pickle.load(file)
 		file.close()
-		with open(prefix + 'amz_usu_adjlists.pickle', 'rb') as file:
+		with open(prefix + 'amazon_usu_adjlists.pickle', 'rb') as file:
 			relation2 = pickle.load(file)
 		file.close()
-		with open(prefix + 'amz_uvu_adjlists.pickle', 'rb') as file:
+		with open(prefix + 'amazon_uvu_adjlists.pickle', 'rb') as file:
 			relation3 = pickle.load(file)
 		file.close()
 		relation_list = [relation1, relation2, relation3]
-	elif data == 'KDK':
+
+	elif data == 'tfinance':
+		prefix = "/data/pyg/TFinance/processed/"
+		data_file = torch.load(prefix + "tfinance_data.pt")[0]
+
+		labels = np.array(data_file['y'])
+		feat_data = np.array(data_file['x'])
+
+		# load the preprocessed adj_lists
+		with open(prefix + 'tfinance_homo_adjlists.pickle', 'rb') as file:
+			homo = pickle.load(file)
+		file.close()
+		with open(prefix + 'tfinance_homo_adjlists.pickle', 'rb') as file:
+			relation1 = pickle.load(file)
+		file.close()
+		relation_list = [relation1]
+
+	elif data == 'elliptic':
+		prefix = "/data/pyg/Elliptic/processed/"
+		data_file = torch.load(prefix + "elliptic_data.pt")[0]
+
+		labels = np.array(data_file['y'])
+		feat_data = np.array(data_file['x'])
+
+		# load the preprocessed adj_lists
+		with open(prefix + 'elliptic_homo_adjlists.pickle', 'rb') as file:
+			homo = pickle.load(file)
+		file.close()
+		with open(prefix + 'elliptic_homo_adjlists.pickle', 'rb') as file:
+			relation1 = pickle.load(file)
+		file.close()
+		relation_list = [relation1]
+
+	elif data == 'weibo':
+		prefix = "/data/pyg/Weibo/processed/"
+		data_file = torch.load(prefix + "weibo.pt")[0]
+
+		labels = np.array(data_file['y'])
+		feat_data = np.array(data_file['x'])
+
+		# load the preprocessed adj_lists
+		with open(prefix + 'weibo_homo_adjlists.pickle', 'rb') as file:
+			homo = pickle.load(file)
+		file.close()
+		with open(prefix + 'weibo_homo_adjlists.pickle', 'rb') as file:
+			relation1 = pickle.load(file)
+		file.close()
+		relation_list = [relation1]	
+
+	elif data == 'kdk':
 		postfix = "(CSC).npz"
 
 		graph_num = str(graph_id).zfill(3)
@@ -131,14 +185,14 @@ def load_data(data, prefix = 'data/', graph_id=None):
 		relation_list = [scipy.sparse.load_npz(network_path_list[i]) for i in range(len(network_path_list))]
 		for i, relation in enumerate(relation_list):
 			relation_list[i] = sparse_to_adjlist_for_train(relation + sp.eye(relation.shape[0]))
-		
+
 		network_dir_path_homo = os.path.join(prefix, "G0_Homo")
 		homo_network_path = os.path.join(network_dir_path_homo, graph_num + "_G0_Homo_network" + postfix)
 		homo = scipy.sparse.load_npz(homo_network_path)
 		homo = sparse_to_adjlist_for_train(homo + sp.eye(homo.shape[0]))
 
-	return homo, relation_list, feat_data, labels
 
+	return homo, relation_list, feat_data, labels
 
 def normalize(mx):
 	"""
