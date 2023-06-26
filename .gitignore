@@ -1,4 +1,4 @@
-
+.json
 *.xml
 .idea/$CACHE_FILE$
 *.iml
@@ -8,3 +8,5 @@ backup.py
 *.txt
 *.ipynb
 *.zip
+논문결과/*
+practice_exp_logs/*
