@@ -5,11 +5,14 @@ import scipy.sparse
 import scipy.sparse as sp
 from scipy.io import loadmat
 import copy as cp
-from sklearn.metrics import f1_score, accuracy_score, recall_score, roc_auc_score, average_precision_score
+from sklearn.metrics import f1_score, accuracy_score, recall_score, roc_auc_score, precision_score
+from typing import Tuple
 from collections import defaultdict
+from typing import Optional, Callable
 from datetime import datetime
 import os
 import torch
+import random
 
 
 """
@@ -18,9 +21,9 @@ import torch
 class log:
 	def __init__(self, model_name=None, data_name=None):
 		self.time_step = str(datetime.now())
-		self.save_dir_path = f"/data/Save_model({model_name})"
-		self.log_dir_path = f"./log({data_name}, {model_name})"
-		self.log_file_name = f"({model_name})" + self.time_step + ".log"
+		self.save_dir_path = f".\\data\\Save_model({model_name})"
+		self.log_dir_path = f".\\log({data_name}, {model_name})"
+		self.log_file_name = f"({model_name})" + str(self.time_step).split(":")[-1] + ".log"
 		self.train_log_path = os.path.join(self.log_dir_path, "train", self.log_file_name)
 		self.valid_log_path = os.path.join(self.log_dir_path, "valid", self.log_file_name)
 		self.test_log_path = os.path.join(self.log_dir_path, "test", self.log_file_name)
@@ -78,7 +81,7 @@ def load_data(data, prefix='data/', graph_id=None):
 	"""
 	# yml 파일에 설정된 데이터셋(data_name)에 따라 label, feature, relation을 불러옴. 
 	if data == 'yelp':
-		prefix = "/data/pyg/YelpChi/processed/"
+		prefix = "./data/pyg/YelpChi/processed/"
 		data_file = torch.load(prefix + "YelpChi_data.pt")[0]
 		labels = np.array(data_file['review']['y'])
 		feat_data = np.array(data_file['review']['x'])
@@ -99,7 +102,7 @@ def load_data(data, prefix='data/', graph_id=None):
 		relation_list = [relation1, relation2, relation3]
 
 	elif data == 'amazon':
-		prefix = "/data/pyg/AmazonFraud/processed/"
+		prefix = "./data/pyg/AmazonFraud/processed/"
 		data_file = torch.load(prefix + "AmazonFraud_data.pt")[0]
 
 		labels = np.array(data_file['user']['y'])
@@ -119,9 +122,31 @@ def load_data(data, prefix='data/', graph_id=None):
 			relation3 = pickle.load(file)
 		file.close()
 		relation_list = [relation1, relation2, relation3]
+  
+	elif data == 'amazon_new':
+		prefix = "./data/pyg/AmazonFraud/processed/"
+		data_file = torch.load(prefix + "AmazonFraud_new_data.pt")
+
+		labels = np.array(data_file['user'].y)
+		feat_data = np.array(data_file['user'].x)
+
+		# load the preprocessed adj_lists
+		with open(prefix + 'amazon_new_homo_adjlists.pickle', 'rb') as file:
+			homo = pickle.load(file)
+		file.close()
+		with open(prefix + 'amazon_new_upu_adjlists.pickle', 'rb') as file:
+			relation1 = pickle.load(file)
+		file.close()
+		with open(prefix + 'amazon_new_usu_adjlists.pickle', 'rb') as file:
+			relation2 = pickle.load(file)
+		file.close()
+		with open(prefix + 'amazon_new_uvu_adjlists.pickle', 'rb') as file:
+			relation3 = pickle.load(file)
+		file.close()
+		relation_list = [relation1, relation2, relation3]
 
 	elif data == 'tfinance':
-		prefix = "/data/pyg/TFinance/processed/"
+		prefix = "./data/pyg/TFinance/processed/"
 		data_file = torch.load(prefix + "tfinance_data.pt")[0]
 
 		labels = np.array(data_file['y'])
@@ -137,7 +162,7 @@ def load_data(data, prefix='data/', graph_id=None):
 		relation_list = [relation1]
 
 	elif data == 'elliptic':
-		prefix = "/data/pyg/Elliptic/processed/"
+		prefix = "./data/pyg/Elliptic/processed/"
 		data_file = torch.load(prefix + "elliptic_data.pt")[0]
 
 		labels = np.array(data_file['y'])
@@ -153,7 +178,7 @@ def load_data(data, prefix='data/', graph_id=None):
 		relation_list = [relation1]
 
 	elif data == 'weibo':
-		prefix = "/data/pyg/Weibo/processed/"
+		prefix = "./data/pyg/Weibo/processed/"
 		data_file = torch.load(prefix + "weibo.pt")[0]
 
 		labels = np.array(data_file['y'])
@@ -272,101 +297,172 @@ def undersample(pos_nodes, neg_nodes, scale=1):
 	return batch_nodes
 
 
-def test_sage(test_cases, labels, model, batch_size, ckp, flag=None):
-	"""
-	Test the performance of GraphSAGE
-	:param test_cases: a list of testing node
-	:param labels: a list of testing node labels
-	:param model: the GNN model
-	:param batch_size: number nodes in a batch
-	"""
+# def test_sage(test_cases, labels, model, batch_size, ckp, flag=None):
+# 	"""
+# 	Test the performance of GraphSAGE
+# 	:param test_cases: a list of testing node
+# 	:param labels: a list of testing node labels
+# 	:param model: the GNN model
+# 	:param batch_size: number nodes in a batch
+# 	"""
 
-	test_batch_num = int(len(test_cases) / batch_size) + 1
-	f1_gnn = 0.0
-	acc_gnn = 0.0
-	recall_gnn = 0.0
-	gnn_list = []
-	for iteration in range(test_batch_num):
-		i_start = iteration * batch_size
-		i_end = min((iteration + 1) * batch_size, len(test_cases))
-		batch_nodes = test_cases[i_start:i_end]
-		batch_label = labels[i_start:i_end]
-		gnn_prob = model.to_prob(batch_nodes)
-		f1_gnn += f1_score(batch_label, gnn_prob.data.cpu().numpy().argmax(axis=1), average="macro")
-		acc_gnn += accuracy_score(batch_label, gnn_prob.data.cpu().numpy().argmax(axis=1))
-		recall_gnn += recall_score(batch_label, gnn_prob.data.cpu().numpy().argmax(axis=1), average="macro")
-		gnn_list.extend(gnn_prob.data.cpu().numpy()[:, 1].tolist())
+# 	test_batch_num = int(len(test_cases) / batch_size) + 1
+# 	f1_gnn = 0.0
+# 	acc_gnn = 0.0
+# 	recall_gnn = 0.0
+# 	gnn_list = []
+# 	for iteration in range(test_batch_num):
+# 		i_start = iteration * batch_size
+# 		i_end = min((iteration + 1) * batch_size, len(test_cases))
+# 		batch_nodes = test_cases[i_start:i_end]
+# 		batch_label = labels[i_start:i_end]
+# 		gnn_prob = model.to_prob(batch_nodes)
+# 		f1_gnn += f1_score(batch_label, gnn_prob.data.cpu().numpy().argmax(axis=1), average="macro")
+# 		acc_gnn += accuracy_score(batch_label, gnn_prob.data.cpu().numpy().argmax(axis=1))
+# 		recall_gnn += recall_score(batch_label, gnn_prob.data.cpu().numpy().argmax(axis=1), average="macro")
+# 		gnn_list.extend(gnn_prob.data.cpu().numpy()[:, 1].tolist())
 
-	auc_gnn = roc_auc_score(labels, np.array(gnn_list))
-	ap_gnn = average_precision_score(labels, np.array(gnn_list))
-	line1= f"GNN F1: {f1_gnn / test_batch_num:.4f}|\tGNN Accuracy: {acc_gnn / test_batch_num:.4f}|"+\
-       f"\tGNN Recall: {recall_gnn / test_batch_num:.4f}|\tGNN auc: {auc_gnn:.4f}|\tGNN ap: {ap_gnn:.4f}"
-		
-	if flag=="val":
-		ckp.write_valid_log("Validation: "+ line1)
-	elif flag=="test":
-		ckp.write_test_log("Test: "+ line1)
-	return auc_gnn,(recall_gnn / test_batch_num), (f1_gnn / test_batch_num)
-
-
-def test_care(test_cases, labels, model, batch_size, ckp, flag=None):
-	"""
-	Test the performance of CARE-GNN and its variants
-	:param test_cases: a list of testing node
-	:param labels: a list of testing node labels
-	:param model: the GNN model
-	:param batch_size: number nodes in a batch
-	:returns: the AUC and Recall of GNN and Simi modules
-	"""
-
-	test_batch_num = int(len(test_cases) / batch_size) + 1
-	f1_gnn = 0.0
-	acc_gnn = 0.0
-	recall_gnn = 0.0
-	f1_label1 = 0.0
-	acc_label1 = 0.00
-	recall_label1 = 0.0
-	gnn_list = []
-	label_list1 = []
-
-	for iteration in range(test_batch_num):
-		i_start = iteration * batch_size
-		i_end = min((iteration + 1) * batch_size, len(test_cases))
-		batch_nodes = test_cases[i_start:i_end]
-		batch_label = labels[i_start:i_end]
-
-		# 학습된 CARE-GNN 모델을 통해 반환되는 GNN score와 label-aware score를 통해 성능 평가를 수행한다.
-		gnn_prob, label_prob1 = model.to_prob(batch_nodes, batch_label, train_flag=False)
-
-		f1_gnn += f1_score(batch_label, gnn_prob.data.cpu().numpy().argmax(axis=1), average="macro")
-		acc_gnn += accuracy_score(batch_label, gnn_prob.data.cpu().numpy().argmax(axis=1))
-		recall_gnn += recall_score(batch_label, gnn_prob.data.cpu().numpy().argmax(axis=1), average="macro")
-
-		f1_label1 += f1_score(batch_label, label_prob1.data.cpu().numpy().argmax(axis=1), average="macro")
-		acc_label1 += accuracy_score(batch_label, label_prob1.data.cpu().numpy().argmax(axis=1))
-		recall_label1 += recall_score(batch_label, label_prob1.data.cpu().numpy().argmax(axis=1), average="macro")
-
-		gnn_list.extend(gnn_prob.data.cpu().numpy()[:, 1].tolist())
-		label_list1.extend(label_prob1.data.cpu().numpy()[:, 1].tolist())
-
-	auc_gnn = roc_auc_score(labels, np.array(gnn_list))
-	ap_gnn = average_precision_score(labels, np.array(gnn_list))
-	auc_label1 = roc_auc_score(labels, np.array(label_list1))
-	ap_label1 = average_precision_score(labels, np.array(label_list1))
-	
+# 	auc_gnn = roc_auc_score(labels, np.array(gnn_list))
+# 	ap_gnn = average_precision_score(labels, np.array(gnn_list))
 # 	line1= f"GNN F1: {f1_gnn / test_batch_num:.4f}|\tGNN Accuracy: {acc_gnn / test_batch_num:.4f}|"+\
 #        f"\tGNN Recall: {recall_gnn / test_batch_num:.4f}|\tGNN auc: {auc_gnn:.4f}|\tGNN ap: {ap_gnn:.4f}"
-# 	line2 = f"Label1 F1: {f1_label1 / test_batch_num:.4f}|\tLabel1 Accuracy: {acc_label1 / test_batch_num:.4f}|"+\
-#        f"\tLabel1 Recall: {recall_label1 / test_batch_num:.4f}|\tLabel1 auc: {auc_label1:.4f}|\tLabel1 ap: {ap_label1:.4f}"
+		
+# 	if flag=="val":
+# 		ckp.write_valid_log("Validation: "+ line1)
+# 	elif flag=="test":
+# 		ckp.write_test_log("Test: "+ line1)
+# 	return auc_gnn,(recall_gnn / test_batch_num), (f1_gnn / test_batch_num)
+
+
+# def test_care(test_cases, labels, model, batch_size, ckp, flag=None):
+# 	"""
+# 	Test the performance of CARE-GNN and its variants
+# 	:param test_cases: a list of testing node
+# 	:param labels: a list of testing node labels
+# 	:param model: the GNN model
+# 	:param batch_size: number nodes in a batch
+# 	:returns: the AUC and Recall of GNN and Simi modules
+# 	"""
+
+# 	test_batch_num = int(len(test_cases) / batch_size) + 1
+# 	f1_gnn = 0.0
+# 	acc_gnn = 0.0
+# 	recall_gnn = 0.0
+ 
+# 	f1_label1 = 0.0
+# 	acc_label1 = 0.00
+# 	recall_label1 = 0.0
+# 	gnn_list = []
+# 	label_list1 = []
+
+# 	for iteration in range(test_batch_num):
+# 		i_start = iteration * batch_size
+# 		i_end = min((iteration + 1) * batch_size, len(test_cases))
+# 		batch_nodes = test_cases[i_start:i_end]
+# 		batch_label = labels[i_start:i_end]
+
+# 		# 학습된 CARE-GNN 모델을 통해 반환되는 GNN score와 label-aware score를 통해 성능 평가를 수행한다.
+# 		gnn_prob, label_prob1 = model.to_prob(batch_nodes, batch_label, train_flag=False)
+
+# 		f1_gnn += f1_score(batch_label, gnn_prob.data.cpu().numpy().argmax(axis=1), average="macro")
+# 		acc_gnn += accuracy_score(batch_label, gnn_prob.data.cpu().numpy().argmax(axis=1))
+# 		recall_gnn += recall_score(batch_label, gnn_prob.data.cpu().numpy().argmax(axis=1), average="macro")
+
+# 		f1_label1 += f1_score(batch_label, label_prob1.data.cpu().numpy().argmax(axis=1), average="macro")
+# 		acc_label1 += accuracy_score(batch_label, label_prob1.data.cpu().numpy().argmax(axis=1))
+# 		recall_label1 += recall_score(batch_label, label_prob1.data.cpu().numpy().argmax(axis=1), average="macro")
+
+# 		gnn_list.extend(gnn_prob.data.cpu().numpy()[:, 1].tolist())
+# 		label_list1.extend(label_prob1.data.cpu().numpy()[:, 1].tolist())
+
+# 	auc_gnn = roc_auc_score(labels, np.array(gnn_list))
+# 	ap_gnn = average_precision_score(labels, np.array(gnn_list))
+# 	auc_label1 = roc_auc_score(labels, np.array(label_list1))
+# 	ap_label1 = average_precision_score(labels, np.array(label_list1))
 	
-	line1= f"GNN F1: {f1_gnn / test_batch_num:.4f}\tGNN Accuracy: {acc_gnn / test_batch_num:.4f}"+\
-       f"\tGNN Recall: {recall_gnn / test_batch_num:.4f}\tGNN AUC-ROC: {auc_gnn:.4f}\tGNN AP: {ap_gnn:.4f}"
+# # 	line1= f"GNN F1: {f1_gnn / test_batch_num:.4f}|\tGNN Accuracy: {acc_gnn / test_batch_num:.4f}|"+\
+# #        f"\tGNN Recall: {recall_gnn / test_batch_num:.4f}|\tGNN auc: {auc_gnn:.4f}|\tGNN ap: {ap_gnn:.4f}"
+# # 	line2 = f"Label1 F1: {f1_label1 / test_batch_num:.4f}|\tLabel1 Accuracy: {acc_label1 / test_batch_num:.4f}|"+\
+# #        f"\tLabel1 Recall: {recall_label1 / test_batch_num:.4f}|\tLabel1 auc: {auc_label1:.4f}|\tLabel1 ap: {ap_label1:.4f}"
+	
+# 	line1= f"GNN F1: {f1_gnn / test_batch_num:.4f}\tGNN Accuracy: {acc_gnn / test_batch_num:.4f}"+\
+#        f"\tGNN Recall: {recall_gnn / test_batch_num:.4f}\tGNN AUC-ROC: {auc_gnn:.4f}\tGNN AP: {ap_gnn:.4f}"
 
-	if flag=="val":
-		ckp.write_valid_log("Validation: "+ line1)
-		# ckp.write_valid_log("Validation: "+ line2, print_line=False)
-	elif flag=="test":
-		ckp.write_test_log("Test: "+ line1)
-		# ckp.write_test_log("Test: "+ line2, print_line=False)
+# 	if flag=="val":
+# 		ckp.write_valid_log("Validation: "+ line1)
+# 		# ckp.write_valid_log("Validation: "+ line2, print_line=False)
+# 	elif flag=="test":
+# 		ckp.write_test_log("Test: "+ line1)
+# 		# ckp.write_test_log("Test: "+ line2, print_line=False)
 
-	return auc_gnn, recall_gnn, (f1_gnn / test_batch_num)
+# 	return auc_gnn, recall_gnn, (f1_gnn / test_batch_num)
+
+def test(test_nodes: np.array, labels: np.array, model, batch_size: int, 
+	result=None, epoch: Optional[int]=None, epoch_best: Optional[int]=None,
+	flag: Optional[str]=None, print_line: Optional[bool]=True) -> Tuple[float, float, float, float]:
+        
+	"""
+	Test the performance of the model (F1, Accuracy, Recall, AUC-ROC).
+	
+	Determine the best threshold with repect to F1 score.
+	Calculate the Accuracy, Recall with the threshold.
+	
+	Prediction_list comprises the index of max value for each row.
+	Conficene_list comprises the value of argmax for each row.
+	"""
+
+	# output_list[0]: prediction_list, Prediction of the model.
+	# output_list[1]: confidence_list, Confidence for the max prediction.
+	# output_list[2]: anomaly_confidence_list, Confidence of the predicted anomalies.
+	output_list = [[], [], []]
+	num_batch = int(len(test_nodes) / batch_size) + 1 # Performance test with batch process.
+	for i in range(num_batch):
+		start = i * batch_size
+		end = min((i + 1) * batch_size, len(test_nodes))
+		batch_nodes = test_nodes[start:end]
+		batch_labels = labels[start:end]
+
+		output = model.to_prob(batch_nodes, batch_labels, train_flag=False)[0].data.cpu().numpy() # Casting the output tensor to numpy array. 
+		prediction = output.argmax(axis=1) # The argmax value represents the prediction(index) of the model. 
+		confidence = output.max(axis=1) # Tha max value represents the conficende for each the prediction(index).
+		anomaly_confidence = output[:,1]
+		
+		output_list[0].extend(prediction.tolist()) # Combining the predictions into the list
+		output_list[1].extend(confidence.tolist())
+		output_list[2].extend(anomaly_confidence.tolist())
+	
+	output_list = np.array(output_list) # Casting the list to numpy array. 
+	
+	accuracy = accuracy_score(labels, output_list[0])
+	f1 = f1_score(labels, output_list[0])
+	f1_macro = f1_score(labels, output_list[0], average='macro')
+	precision = precision_score(labels, output_list[0], zero_division=0)
+	precision_macro = precision_score(labels, output_list[0], zero_division=0, average='macro')
+	recall = recall_score(labels, output_list[0])
+	recall_macro = recall_score(labels, output_list[0], average='macro')
+	auc = roc_auc_score(labels, output_list[2])
+	
+	line= f"- F1: {f1:.4f}\t- Recall: {recall:.4f}\t- Precision: {precision:.4f}\t- Accuracy: {accuracy:.4f}\t- AUC-ROC: {auc:.4f}\t- F1-macro: {f1_macro:.4f}\t- Recall-macro: {recall_macro:.4f}\t- AP: {precision_macro:.4f}\t\n"
+
+	if not (result is None):
+		if flag=="val":
+			result.write_val_log(epoch, epoch_best, accuracy, f1, f1_macro, precision, precision_macro, recall, recall_macro, auc, line, print_line)
+		elif flag=="test":
+			result.write_test_log(epoch_best, accuracy, f1, f1_macro, precision, precision_macro, recall, recall_macro, auc, line, print_line)
+
+	return auc, recall, f1_macro, precision
+
+
+def create_dir(dir_path):
+    try:
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path)
+    except OSError:
+        print("Error: Failed to create the directory.")
+
+def set_seeds(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)

@@ -1,11 +1,12 @@
 import argparse
-import yaml
 import torch
 import time
 import numpy as np
-from utils import log
 from collections import defaultdict, OrderedDict
+import json
+
 from train import ModelHandler
+from utils import set_seeds
 
 def set_random_seed(seed):
 	torch.manual_seed(seed)
@@ -14,20 +15,11 @@ def set_random_seed(seed):
 
 
 def main(config):
-	ckp = log(config['model'], config['data_name'])
 	config_lines = print_config(config)
-	ckp.write_train_log(config_lines, print_line=False)
-	ckp.write_valid_log(config_lines, print_line=False)
-	ckp.write_test_log(config_lines, print_line=False)
+	set_seeds(config['seed'])
+	model = ModelHandler(config)
+	gnn_auc, gnn_recall, gnn_f1 = model.train()
 
-	set_random_seed(config['seed']) # 실험에 사용된 seed를 가중치 이름에 넣어 저장되도록 한다.
-	model = ModelHandler(ckp)
-	gnn_auc, gnn_recall, gnn_f1 = model.train(config)
-
-	ckp.write_test_log("F1-Macro: {}".format(gnn_f1))
-	ckp.write_test_log("AUC: {}".format(gnn_auc))
-	ckp.write_test_log("Recall: {}".format(gnn_recall))
-	
 def multi_run_main(config):
 	config_lines = print_config(config)
 	hyperparams = []
@@ -38,64 +30,53 @@ def multi_run_main(config):
 	f1_list, auc_list, recall_list = [], [], []
 	# configuration 오브젝트들을 튜플로 저장한다.
 	configs = grid(config)
-	ckp = log(config['model'], config['data_name'])
 	for i, cnf in enumerate(configs):
 		print('Running {}:\n'.format(i))
-		for k in hyperparams:
-			# cnf['save_dir'] += '{}_{}_'.format(k, cnf[k]) # Seed에 따라 실험별 가중치를 저장할 수 있도록 한다.
-			ckp.write_train_log(line=config_lines + f"\nCurrent Seed: {cnf[k]}", print_line=False)
-			ckp.write_valid_log(line=config_lines + f"\nCurrent Seed: {cnf[k]}", print_line=False)
-			ckp.write_test_log(line=config_lines + f"\nCurrent Seed: {cnf[k]}", print_line=False)
 		# print(cnf['save_dir'])
 		set_random_seed(cnf['seed'])
 		st = time.time()
-		model = ModelHandler(ckp)
+		model = ModelHandler(cnf, ckp)
 		# AUC-ROC / Recall / F1-macro를 기록한다.
-		gnn_auc, gnn_recall, gnn_f1 = model.train(cnf)
-		ckp.write_test_log("F1-Macro: {}".format(gnn_f1))
-		ckp.write_test_log("AUC: {}".format(gnn_auc))
-		ckp.write_test_log("Recall: {}".format(gnn_recall))
-
+		gnn_auc, gnn_recall, gnn_f1 = model.train()
 		f1_list.append(gnn_f1)
 		auc_list.append(gnn_auc)
 		recall_list.append(gnn_recall)
 		print("Running {} done, elapsed time {}s".format(i, time.time()-st))
 
-	ckp.multi_run_log(config_lines)
-	ckp.multi_run_log("F1-Macro: {}".format(f1_list))
-	ckp.multi_run_log("AUC: {}".format(auc_list))
-	ckp.multi_run_log("Recall: {}".format(recall_list))
 
 	# 기록된 AUC-ROC / Gmean의 평균을 계산하도록 한다.
 	f1_mean, f1_std = np.mean(f1_list), np.std(f1_list, ddof=1)
 	auc_mean, auc_std = np.mean(auc_list), np.std(auc_list, ddof=1)
 	recall_mean, recall_std = np.mean(recall_list), np.std(recall_list, ddof=1)
 
-	ckp.multi_run_log("Total - F1-Macro: {}+{}".format(f1_mean, f1_std))
-	ckp.multi_run_log("Total - AUC: {}+{}".format(auc_mean, auc_std))
-	ckp.multi_run_log("Total - Recall: {}+{}".format(recall_mean, recall_std))
 	
 	
-def get_args():
-	parser = argparse.ArgumentParser()
+# def get_args():
+# 	parser = argparse.ArgumentParser()
 	# dataset and model dependent args
-	parser.add_argument('--multi_run', action='store_true', help='flag: multi run')
-	parser.add_argument('--data_name', type=str, default='yelp', help='The dataset name. [yelp, amazon]')
-	parser.add_argument('--data_dir', type=str, default='/data/graphs_v3', help='The dataset dir path')
-	parser.add_argument('--model', type=str, default='CARE', help='The model name. [CARE, SAGE]')
-	parser.add_argument('--inter', type=str, default='GNN', help='The inter-relation aggregator type. [Att, Weight, Mean, GNN]')
-	parser.add_argument('--seed', type=list, default=[0,1,2,3,4,5,6,7,8,9], action="append", help='number of samples for each layer')
-	parser.add_argument('--batch_size', type=int, default=1024, help='Batch size 1024 for yelp, 256 for amazon.')
-	parser.add_argument('--lr', type=float, default=0.01, help='Initial learning rate.')
-	parser.add_argument('--lambda_1', type=float, default=2, help='Simi loss weight.')
-	parser.add_argument('--weight_decay', type=float, default=1e-3, help='Weight decay (L2 loss weight).')
-	parser.add_argument('--emb_size', type=int, default=64, help='Node embedding size at the last layer.')
-	parser.add_argument('--num_epochs', type=int, default=101, help='Number of epochs.')
-	parser.add_argument('--valid_epochs', type=int, default=2, help='Number of epochs.')
-	parser.add_argument('--step_size', type=float, default=2e-2, help='RL action step size')
-	parser.add_argument('--graph_id', type=int, default=0, help='random seed')
-	parser.add_argument('--no-cuda', action='store_true', default=False, help='Disables CUDA training.')
-	parser.add_argument('--cuda_id', type=int, default=0, help='GPU index')
+	# parser.add_argument('--multi_run', action='store_true', help='flag: multi run')
+	# parser.add_argument('--data_name', type=str, default='yelp', help='The dataset name. [yelp, amazon]')
+	# parser.add_argument('--data_dir', type=str, default='/data/graphs_v3', help='The dataset dir path')
+	# parser.add_argument('--model', type=str, default='CARE', help='The model name. [CARE, SAGE]')
+	# parser.add_argument('--inter', type=str, default='GNN', help='The inter-relation aggregator type. [Att, Weight, Mean, GNN]')
+	# parser.add_argument('--seed', type=list, default=[0,1,2,3,4,5,6,7,8,9], action="append", help='number of samples for each layer')
+	# parser.add_argument('--batch_size', type=int, default=1024, help='Batch size 1024 for yelp, 256 for amazon.')
+	# parser.add_argument('--lr', type=float, default=0.01, help='Initial learning rate.')
+	# parser.add_argument('--lambda_1', type=float, default=2, help='Simi loss weight.')
+	# parser.add_argument('--weight_decay', type=float, default=1e-3, help='Weight decay (L2 loss weight).')
+	# parser.add_argument('--emb_size', type=int, default=64, help='Node embedding size at the last layer.')
+	# parser.add_argument('--num_epochs', type=int, default=101, help='Number of epochs.')
+	# parser.add_argument('--valid_epochs', type=int, default=2, help='Number of epochs.')
+	# parser.add_argument('--step_size', type=float, default=2e-2, help='RL action step size')
+	# parser.add_argument('--graph_id', type=int, default=0, help='random seed')
+	# parser.add_argument('--no-cuda', action='store_true', default=False, help='Disables CUDA training.')
+	# parser.add_argument('--cuda_id', type=int, default=0, help='GPU index')
+	# args = vars(parser.parse_args())
+	# return args
+
+def get_arguments():
+	parser = argparse.ArgumentParser()
+	parser.add_argument('--exp_config_path', type=str, default='./experiment_configs/template_GCN.json')
 	args = vars(parser.parse_args())
 	return args
 
@@ -157,10 +138,7 @@ def grid(kwargs):
 # Module Command-line Behavior #
 ################################################################################
 if __name__ == '__main__':
-	cfg = get_args()
-	# config 파서에 해당하는 configuration 파일의 오브젝트들을 튜플로 반환한다.
-	# config = get_config(cfg['config'])
-	if cfg['multi_run']:
-		multi_run_main(cfg)
-	else:
-		main(cfg)
+	args = get_arguments()
+	with open(args['exp_config_path']) as f:
+		args = json.load(f)
+	main(args)

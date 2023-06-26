@@ -1,4 +1,5 @@
 # CARE-GNN
+python main.py --data_name=yelp --model=CARE --emb_size=64 --lr=0.1 --num_epochs=101 --batch_size=1024 --valid_epochs=5 --lambda_1=2 --step_size=2e-2 --cuda_id=0 --multi_run
 
 A PyTorch implementation for the [CIKM 2020](https://www.cikm2020.org/) paper below:  
 **Enhancing Graph Neural Network-based Fraud Detectors against Camouflaged Fraudsters**.  
